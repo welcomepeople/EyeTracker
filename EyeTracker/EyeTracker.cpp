@@ -12,6 +12,8 @@ HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
+const COLORREF TRANSPARENT_COLOR = RGB(0, 0, 0);
+
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
@@ -27,7 +29,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(lpCmdLine);
 
     // TODO: Place code here.
-
+    
     // Initialize global strings
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_EYETRACKER, szWindowClass, MAX_LOADSTRING);
@@ -77,7 +79,7 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_EYETRACKER));
     wcex.hCursor        = LoadCursor(nullptr, IDC_ARROW);
     wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
-    wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_EYETRACKER);
+    wcex.lpszMenuName   = nullptr;// MAKEINTRESOURCEW(IDC_EYETRACKER);
     wcex.lpszClassName  = szWindowClass;
     wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
 
@@ -97,14 +99,36 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // Store instance handle in our global variable
+   
+   int screenW = GetSystemMetrics(SM_CXSCREEN);
+   int screenH = GetSystemMetrics(SM_CYSCREEN);
+   DWORD exStyle = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW;
+   DWORD style = WS_POPUP;
 
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+  /* HWND hWnd1 = CreateWindowW(
+        szWindowClass, 
+        szTitle, 
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, 
+        0, 
+        CW_USEDEFAULT, 
+        0, 
+        nullptr, nullptr, hInstance, nullptr);*/
+
+   HWND hWnd = CreateWindowExW(
+       exStyle,
+       szWindowClass,
+       szTitle,
+       style,
+       0, 0, screenW, screenH,
+       nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {
       return FALSE;
    }
+
+   SetLayeredWindowAttributes(hWnd, TRANSPARENT_COLOR, 0, LWA_COLORKEY);
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
@@ -148,6 +172,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
             // TODO: Add any drawing code that uses hdc here...
+            RECT rect;
+            GetClientRect(hWnd, &rect);
+
+            // ispuni ceo prozor "transparentnom" bojom
+            HBRUSH bgBrush = CreateSolidBrush(TRANSPARENT_COLOR);
+            FillRect(hdc, &rect, bgBrush);
+            DeleteObject(bgBrush);
+
+            // crveni kruzic
+            int centerX = (rect.right - rect.left) / 2;
+            int centerY = (rect.bottom - rect.top) / 2;
+            int radius = 10;
+
+			HBRUSH redBrush = CreateSolidBrush(RGB(255, 0, 0));
+            HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, redBrush);
+
+            //HPEN redPen = (HPEN)CreatePen(PS_SOLID, 3, RGB(255, 0, 0));
+            //HPEN oldPen = (HPEN)SelectObject(hdc, redPen);
+
+            Ellipse(hdc, centerX - radius, centerY - radius, centerX + radius, centerY + radius);
+
+            SelectObject(hdc, oldBrush);
+            //SelectObject(hdc, oldPen);
+            DeleteObject(redBrush);
+            //DeleteObject(redPen);
+
+
             EndPaint(hWnd, &ps);
         }
         break;
