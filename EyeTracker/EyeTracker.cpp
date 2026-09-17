@@ -3,7 +3,11 @@
 
 #include "framework.h"
 #include "EyeTracker.h"
+
 #include <opencv2/opencv.hpp>
+#include "Overlay.h"
+#include "GazeTracker.h"
+#include "Constants.h"
 
 #define MAX_LOADSTRING 100
 
@@ -11,8 +15,6 @@
 HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
-
-const COLORREF TRANSPARENT_COLOR = RGB(0, 0, 0);
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -130,6 +132,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    SetLayeredWindowAttributes(hWnd, TRANSPARENT_COLOR, 0, LWA_COLORKEY);
 
+   StartCapture(hWnd);
+
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
 
@@ -175,36 +179,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             RECT rect;
             GetClientRect(hWnd, &rect);
 
-            // ispuni ceo prozor "transparentnom" bojom
-            HBRUSH bgBrush = CreateSolidBrush(TRANSPARENT_COLOR);
-            FillRect(hdc, &rect, bgBrush);
-            DeleteObject(bgBrush);
-
-            // crveni kruzic
-            int centerX = (rect.right - rect.left) / 2;
-            int centerY = (rect.bottom - rect.top) / 2;
-            int radius = 10;
-
-			HBRUSH redBrush = CreateSolidBrush(RGB(255, 0, 0));
-            HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, redBrush);
-
-            //HPEN redPen = (HPEN)CreatePen(PS_SOLID, 3, RGB(255, 0, 0));
-            //HPEN oldPen = (HPEN)SelectObject(hdc, redPen);
-
-            Ellipse(hdc, centerX - radius, centerY - radius, centerX + radius, centerY + radius);
-
-            SelectObject(hdc, oldBrush);
-            //SelectObject(hdc, oldPen);
-            DeleteObject(redBrush);
-            //DeleteObject(redPen);
-
+            PaintBackground(hdc, rect);
+            PaintGazeMarker(hdc, rect);
 
             EndPaint(hWnd, &ps);
         }
         break;
     case WM_DESTROY:
+        StopCapture();
+        CleanupOverlay();
         PostQuitMessage(0);
         break;
+    case WM_ERASEBKGND:
+        return 1;
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
