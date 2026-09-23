@@ -47,9 +47,6 @@
     <ClCompile Include="GazeTracker.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\dlib-src\dlib\dlib\all\source.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="EyeTracker.rc">

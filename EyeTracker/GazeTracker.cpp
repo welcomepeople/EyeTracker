@@ -26,6 +26,23 @@ static dlib::array2d<dlib::bgr_pixel> MatToDlib(const cv::Mat& mat) {
 	return dlibImg;
 }
 
+static dlib::array2d<unsigned char> MatToDlibGrayscale(const cv::Mat& mat) {
+
+	cv::Mat gray;
+	cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
+	
+	dlib::array2d<unsigned char> dlibImg(gray.rows, gray.cols);
+	for (int r = 0; r < gray.rows; r++) {
+
+		const uchar* rowPointer = gray.ptr<uchar>(r);
+		for (int c = 0; c < gray.cols; c++) {
+
+			dlibImg[r][c] = rowPointer[c];
+		}
+	}
+	return dlibImg;
+}
+
 static void CaptureLoop(HWND targetWindow) {
 
 	RECT rect;
@@ -59,6 +76,10 @@ static void CaptureLoop(HWND targetWindow) {
 	}
 
 	cv::Mat frame, small;
+	dlib::full_object_detection shape;
+	dlib::array2d<unsigned char> dlibImage;
+	std::vector<dlib::rectangle> faces;
+
 	while (gRunning) {
 		auto t0 = std::chrono::steady_clock::now();
 
@@ -71,14 +92,13 @@ static void CaptureLoop(HWND targetWindow) {
 
 		auto t1 = std::chrono::steady_clock::now();
 
-		dlib::array2d<dlib::bgr_pixel> dlibImage = MatToDlib(small);
+		dlibImage = MatToDlibGrayscale(small);
 		auto t2 = std::chrono::steady_clock::now();
-		std::vector<dlib::rectangle> faces = detector(dlibImage);
+		faces = detector(dlibImage);
 		auto t3 = std::chrono::steady_clock::now();
 		if (!faces.empty()) {
 
-			dlib::full_object_detection shape =
-				predictor(dlibImage, faces[0]);
+			shape =	predictor(dlibImage, faces[0]);
 
 			for (unsigned int i = 36; i <= 47; ++i) {
 				cv::Point p(shape.part(i).x() / scale, shape.part(i).y() / scale);

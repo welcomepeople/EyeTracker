@@ -106,14 +106,15 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\dlib-src\dlib;C:\Users\PC Ideal 037\opencv\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\dlib-install\Debug\include;C:\Users\PC Ideal 037\opencv\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>opencv_world500d.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\dlib-src\build\dlib\Debug;C:\Users\PC Ideal 037\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world500d.lib;dlib20.0.99_debug_64bit_msvc1944.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\dlib-install\Debug\lib;C:\Users\PC Ideal 037\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -122,16 +123,17 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;DLIB_NO_GUI_SUPPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\PC Ideal 037\opencv\build\include;C:\dlib-src\dlib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\PC Ideal 037\opencv\build\include;C:\dlib-install\Release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>opencv_world500.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\Users\PC Ideal 037\opencv\build\x64\vc16\lib;C:\dlib-src\build\dlib\Release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world500.lib;dlib20.0.99_release_64bit_msvc1944.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\Users\PC Ideal 037\opencv\build\x64\vc16\lib;C:\dlib-install\Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -144,7 +146,6 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\..\..\..\dlib-src\dlib\dlib\all\source.cpp" />
     <ClCompile Include="EyeTracker.cpp" />
     <ClCompile Include="GazeTracker.cpp" />
     <ClCompile Include="Overlay.cpp" />
