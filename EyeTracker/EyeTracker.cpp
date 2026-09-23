@@ -180,7 +180,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             GetClientRect(hWnd, &rect);
 
             PaintBackground(hdc, rect);
-            PaintGazeMarker(hdc, rect);
+            //PaintGazeMarker(hdc, rect);
 
             EndPaint(hWnd, &ps);
         }
