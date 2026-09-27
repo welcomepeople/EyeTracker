@@ -79,6 +79,10 @@ static void CaptureLoop(HWND targetWindow) {
 	dlib::full_object_detection shape;
 	dlib::array2d<unsigned char> dlibImage;
 	std::vector<dlib::rectangle> faces;
+	dlib::rectangle lastFace;
+	bool hasFace = false;
+	int framesSinceDetect = 0;
+	const int detectingInterval = 30;
 
 	while (gRunning) {
 		auto t0 = std::chrono::steady_clock::now();
@@ -93,27 +97,50 @@ static void CaptureLoop(HWND targetWindow) {
 		auto t1 = std::chrono::steady_clock::now();
 
 		dlibImage = MatToDlibGrayscale(small);
-		auto t2 = std::chrono::steady_clock::now();
-		faces = detector(dlibImage);
-		auto t3 = std::chrono::steady_clock::now();
-		if (!faces.empty()) {
 
-			shape =	predictor(dlibImage, faces[0]);
+		bool needsFullDetect = !hasFace || (framesSinceDetect >= detectingInterval);
+		if (needsFullDetect) {
+			std::vector<dlib::rectangle> faces2 = detector(dlibImage);
+			if (!faces2.empty()) {
+				lastFace = faces2[0];
+				hasFace = true;
+			}
+			else {
+				hasFace = false;
+			}
+			framesSinceDetect = 0;
+		}
+		if (hasFace) {
+			dlib::full_object_detection shape = predictor(dlibImage, lastFace);
+			
+			//long minX = shape.part(0).x();
+			//long maxX = minX;
+			//long minY = shape.part(0).y();
+			//long maxY = minY;
+
+			//for (unsigned int i = 1; i < shape.num_parts(); i++) {
+			//	minX = std::min(minX, (long)shape.part(i).x());
+			//	maxX = std::max(maxX, (long)shape.part(i).x());
+			//	minY = std::min(minY, (long)shape.part(i).y());
+			//	maxY = std::max(maxY, (long)shape.part(i).y());
+			//}
+			//long margin = 20;
+
+			///*long clampedLeft = std::max(0L, minX - margin);
+			//long clampedTop = std::max(0L, minY - margin);
+			//long clampedRight = std::min(static_cast<long>(dlibImage.nc()) - 1, maxX + margin);
+			//long clampedBottom = std::min(static_cast<long>(dlibImage.nr()) - 1, maxY + margin);
+
+			//lastFace = dlib::rectangle(clampedLeft, clampedTop, clampedRight, clampedBottom);*/
+			//lastFace = dlib::rectangle(minX - margin, minY - margin, maxX + margin, maxY + margin);
 
 			for (unsigned int i = 36; i <= 47; ++i) {
 				cv::Point p(shape.part(i).x() / scale, shape.part(i).y() / scale);
 				cv::circle(frame, p, 2, cv::Scalar(0, 255, 0), cv::FILLED);
 			}
+
+			framesSinceDetect++;
 		}
-		auto t4 = std::chrono::steady_clock::now();
-		auto ms = [](auto a, auto b) {
-			return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
-			};
-		char buf[256];
-		sprintf_s(buf, "capture=%lldms convert=%lldms detect=%lldms landmarks=%lldms",
-			ms(t0, t1), ms(t1, t2), ms(t2, t3), ms(t3, t4));
-		//sprintf_s(buf, "%.0fx%.0f", actualw, actualh);
-		cv::setWindowTitle("Camera Debug", buf);
 
 		cv::imshow("Camera Debug", frame);
 		cv::waitKey(1);
