@@ -62,25 +62,27 @@ static cv::Point FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const 
 
 	//margina kako ivica ne bi odsekla zenice
 	int margin = 8;
-	cv::Rect eyeRect(minX - margin, minY - margin,
-		(maxX - minX) + margin * 2, (maxY - minY) + margin * 2);
+	int marginTop = 2, marginSides = 5, marginBottom = 5;
+
+	cv::Rect eyeRect(minX - marginSides, minY - marginTop,
+		(maxX - minX) + marginSides * 2, (maxY - minY) + marginTop + marginBottom);
 	eyeRect &= cv::Rect(0, 0, grayFrame.cols, grayFrame.rows);
 
 	if (eyeRect.width <= 0 || eyeRect.height <= 0)
 		return cv::Point(-1, -1);
 
-	cv::rectangle(debugFrame, eyeRect, cv::Scalar(0, 255, 255), 1);
+	//cv::rectangle(debugFrame, eyeRect, cv::Scalar(0, 255, 255), 1);
 
 	cv::Mat eyeROI = grayFrame(eyeRect);
 
 	cv::Mat threshold;
 	cv::threshold(eyeROI, threshold, 0, 255, cv::THRESH_BINARY_INV | cv::THRESH_OTSU);
 
-	/*if (!debugLabel.empty()) {
+	if (!debugLabel.empty()) {
 		cv::Mat enlarged;
-		cv::resize(threshold, enlarged, cv::Size(), 10, 10, cv::INTER_NEAREST);
+		cv::resize(threshold, enlarged, cv::Size(), 8, 8, cv::INTER_NEAREST);
 		cv::imshow(debugLabel, enlarged);
-	}*/
+	}
 
 	cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
 	cv::morphologyEx(threshold, threshold, cv::MORPH_CLOSE, kernel);
@@ -91,18 +93,154 @@ static cv::Point FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const 
 	if (contours.empty())
 		return cv::Point(-1, -1);
 
-	auto largest = std::max_element(contours.begin(), contours.end(),
+	double bestScore = -1.0;
+	const std::vector<cv::Point>* bestContour = nullptr;
+
+	/*auto largest = std::max_element(contours.begin(), contours.end(),
 		[](const auto& a, const auto& b) {
 			return cv::contourArea(a) < cv::contourArea(b);
 		});
 
 	cv::Moments m = cv::moments(*largest);
 	if (m.m00 == 0)
+		return cv::Point(-1, -1);*/
+
+	for (const auto& c : contours) {
+		double area = cv::contourArea(c);
+		double perimeter = cv::arcLength(c, true);
+		if (area < 2.0 || perimeter == 0) continue;
+
+		double circular = (4 * CV_PI * area) / (perimeter * perimeter);
+		if (circular > bestScore) {
+			bestScore = circular;
+			bestContour = &c;
+		}
+	}
+
+	if (!bestContour)
+		return cv::Point(-1, -1);
+
+	cv::Moments m = cv::moments(*bestContour);
+	if (m.m00 == 0)
 		return cv::Point(-1, -1);
 
 	cv::Point pupilInROI(static_cast<int>(m.m10 / m.m00), static_cast<int>(m.m01 / m.m00));
 
 	return cv::Point(pupilInROI.x + eyeRect.x, pupilInROI.y + eyeRect.y);
+}
+
+static cv::Point FindIris(const cv::Mat& grayFrame, cv::Mat& debugFrame, 
+	const dlib::full_object_detection& shape, int startIdx, int endIdx, 
+	double scale = 1.0, const std::string& debugLabel = "") {
+
+	int minX = shape.part(startIdx).x() / scale;
+	int maxX = minX;
+	int minY = shape.part(startIdx).y() / scale;
+	int maxY = minY;
+
+	for (int i = startIdx + 1; i <= endIdx; i++) {
+		int px = shape.part(i).x() / scale;
+		int py = shape.part(i).y() / scale;
+		minX = std::min(minX, px);
+		maxX = std::max(maxX, px);
+		minY = std::min(minY, py);
+		maxY = std::max(maxY, py);
+	}
+
+	int eyeW = maxX - minX;
+	int padX = 3;
+	int padY = std::max(4, static_cast<int>(eyeW * 0.2));
+
+	cv::Rect eyeRect(minX - padX, minY - padY, 
+		eyeW + padX * 2, (maxY - minY) + padY * 2);
+	eyeRect &= cv::Rect(0, 0, grayFrame.cols, grayFrame.rows);
+
+	if (eyeRect.width <= 0 || eyeRect.height <= 0)
+		return cv::Point(-1, -1);
+
+	cv::rectangle(debugFrame, eyeRect, cv::Scalar(0, 255, 255), 1);
+
+	cv::Mat blurred, equalized;
+	cv::equalizeHist(grayFrame(eyeRect), equalized);
+	cv::GaussianBlur(equalized, blurred, cv::Size(5, 5), 0);
+
+	int minR = std::max(3, static_cast<int>(eyeW * 0.15));
+	int maxR = std::max(minR + 1, static_cast<int>(eyeW * 0.30));
+
+	std::vector<cv::Vec3f> circles;
+	cv::HoughCircles(blurred, circles, cv::HOUGH_GRADIENT,
+		1,
+		blurred.cols,
+		60,
+		9,
+		minR, maxR);
+
+	if (circles.empty())
+		return cv::Point(-1, -1);
+
+	const cv::Vec3f& c = circles[0];
+	cv::Point center(cvRound(c[0]) + eyeRect.x, cvRound(c[1]) + eyeRect.y);
+
+	cv::circle(debugFrame, center, cvRound(c[2]), cv::Scalar(255, 0, 255), 1);
+
+	return center;
+}
+
+static cv::Point2f StabilizePupil(cv::Point rawPupil, cv::Point2f& smoothed, int& missStreak, float maxJump, int maxMiss) {
+	if (rawPupil.x < 0)
+		return smoothed;
+	if (smoothed.x < 0) {
+		smoothed = rawPupil;
+		return smoothed;
+	}
+
+	float dx = rawPupil.x - smoothed.x;
+	float dy = rawPupil.y - smoothed.y;
+
+	float dist = std::sqrt(dx * dx + dy * dy);
+
+	if (dist <= maxJump) {
+		smoothed.x = smoothed.x * 0.5f + rawPupil.x * 0.5f;
+		smoothed.y = smoothed.y * 0.5f + rawPupil.y * 0.5f;
+		missStreak = 0;
+	}
+	else {
+		missStreak++;
+		if (missStreak >= maxMiss) {
+			smoothed = rawPupil;
+			missStreak = 0;
+		}
+	}
+
+	return smoothed;
+}
+
+static bool ComputeGazeFeature(const dlib::full_object_detection& shape,
+	cv::Point2f leftIris, cv::Point2f rightIris, cv::Point2f& out,
+	double scale = 1.0) {
+
+	if (leftIris.x < 0 || rightIris.x < 0)
+		return false;
+
+	auto pt = [&](int idx) {
+		return cv::Point2f(shape.part(idx).x() / scale, shape.part(idx).y() / scale);
+	};
+
+	auto eyeFeature = [&](cv::Point2f iris, int cornerA, int cornerB) {
+		cv::Point2f a = pt(cornerA);
+		cv::Point2f b = pt(cornerB);
+		float eyeW = b.x - a.x;
+		if (std::abs(eyeW) < 1.0f) eyeW = 1.0f;
+		float hx = (iris.x - a.x) / eyeW;
+		float vy = (iris.y - (a.y + b.y) * 0.5f) / std::abs(eyeW);
+		return cv::Point2f(hx, vy);
+	};
+	
+	cv::Point2f l = eyeFeature(leftIris, 36, 39);
+	cv::Point2f r = eyeFeature(rightIris, 42, 45);
+
+	out = cv::Point2f((l.x + r.x) * 0.5f, (l.y + r.y) * 0.5f);
+	return true;
 }
 
 static void CaptureLoop(HWND targetWindow) {
@@ -113,8 +251,8 @@ static void CaptureLoop(HWND targetWindow) {
 	int y = (rect.bottom - rect.top) / 2;
 
 	cv::VideoCapture cap(0);
-	//cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-	//cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+	cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+	cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
 
 	double actualw = cap.get(cv::CAP_PROP_FRAME_WIDTH);
 	double actualh = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
@@ -143,8 +281,16 @@ static void CaptureLoop(HWND targetWindow) {
 	std::vector<dlib::rectangle> faces;
 	dlib::rectangle lastFace;
 	bool hasFace = false;
+
+	cv::Point2f smoothedLPupil(-1, -1);
+	cv::Point2f smoothedRPupil(-1, -1);
+	int lMissStreak = 0;
+	int rMissStreak = 0;
+	const float maxJumpDist = 8.0f;
+	const int maxMissStreak = 5;
+
 	int framesSinceDetect = 0;
-	const int detectingInterval = 30;
+	const int detectingInterval = 10;
 	std::future<std::vector<dlib::rectangle>> detectFuture;
 	bool detectionInProgress = false;
 
@@ -212,8 +358,21 @@ static void CaptureLoop(HWND targetWindow) {
 			cv::Mat fullGray;
 			cv::cvtColor(frame, fullGray, cv::COLOR_BGR2GRAY);
 
-			cv::Point leftPupil = FindPupil(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
-			cv::Point rightPupil = FindPupil(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
+			//cv::Point leftPupilRaw = FindPupil(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
+			//cv::Point rightPupilRaw = FindPupil(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
+			cv::Point leftPupilRaw = FindIris(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
+			cv::Point rightPupilRaw = FindIris(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
+
+			cv::Point2f leftPupil = StabilizePupil(leftPupilRaw, smoothedLPupil, lMissStreak, maxJumpDist, maxMissStreak);
+			cv::Point2f rightPupil = StabilizePupil(rightPupilRaw, smoothedRPupil, rMissStreak, maxJumpDist, maxMissStreak);
+
+			cv::Point2f gazeFeature;
+			if (ComputeGazeFeature(shape, leftPupil, rightPupil, gazeFeature, scale))
+			{
+				char buf[64];
+				sprintf_s(buf, "gaze: x=%.2f y=%.2f", gazeFeature.x, gazeFeature.y);
+				cv::putText(frame, buf, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
+			}
 
 			//long minX = shape.part(0).x();
 			//long maxX = minX;
