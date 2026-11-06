@@ -8,6 +8,7 @@
 #include <dlib/pixel.h>
 
 #include <chrono>
+#include "Config.h"
 
 static std::atomic<bool> gRunning{ false };
 static std::thread gCaptureThread;
@@ -44,7 +45,7 @@ static dlib::array2d<unsigned char> MatToDlibGrayscale(const cv::Mat& mat) {
 	return dlibImg;
 }
 
-static cv::Point FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const dlib::full_object_detection& shape, int startIdx, int endIdx, double scale = 1.0, const std::string& debugLabel = "") {
+static cv::Point2f FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const dlib::full_object_detection& shape, int startIdx, int endIdx, double scale = 1.0, const std::string& debugLabel = "") {
 
 	int minX = shape.part(startIdx).x() / scale;
 	int maxX = minX;
@@ -69,7 +70,7 @@ static cv::Point FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const 
 	eyeRect &= cv::Rect(0, 0, grayFrame.cols, grayFrame.rows);
 
 	if (eyeRect.width <= 0 || eyeRect.height <= 0)
-		return cv::Point(-1, -1);
+		return cv::Point2f(-1, -1);
 
 	//cv::rectangle(debugFrame, eyeRect, cv::Scalar(0, 255, 255), 1);
 
@@ -91,7 +92,7 @@ static cv::Point FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const 
 	cv::findContours(threshold, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
 	if (contours.empty())
-		return cv::Point(-1, -1);
+		return cv::Point2f(-1, -1);
 
 	double bestScore = -1.0;
 	const std::vector<cv::Point>* bestContour = nullptr;
@@ -103,7 +104,7 @@ static cv::Point FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const 
 
 	cv::Moments m = cv::moments(*largest);
 	if (m.m00 == 0)
-		return cv::Point(-1, -1);*/
+		return cv::Point2f(-1, -1);*/
 
 	for (const auto& c : contours) {
 		double area = cv::contourArea(c);
@@ -118,15 +119,14 @@ static cv::Point FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const 
 	}
 
 	if (!bestContour)
-		return cv::Point(-1, -1);
+		return cv::Point2f(-1, -1);
 
 	cv::Moments m = cv::moments(*bestContour);
 	if (m.m00 == 0)
-		return cv::Point(-1, -1);
+		return cv::Point2f(-1, -1);
 
-	cv::Point pupilInROI(static_cast<int>(m.m10 / m.m00), static_cast<int>(m.m01 / m.m00));
-
-	return cv::Point(pupilInROI.x + eyeRect.x, pupilInROI.y + eyeRect.y);
+	return cv::Point2f(static_cast<float>(m.m10 / m.m00) + eyeRect.x, 
+						static_cast<float>(m.m01 / m.m00) + eyeRect.y);
 }
 
 static cv::Point FindIris(const cv::Mat& grayFrame, cv::Mat& debugFrame, 
@@ -186,7 +186,7 @@ static cv::Point FindIris(const cv::Mat& grayFrame, cv::Mat& debugFrame,
 	return center;
 }
 
-static cv::Point2f StabilizePupil(cv::Point rawPupil, cv::Point2f& smoothed, int& missStreak, float maxJump, int maxMiss) {
+static cv::Point2f StabilizePupil(cv::Point2f rawPupil, cv::Point2f& smoothed, int& missStreak, float maxJump, int maxMiss) {
 	if (rawPupil.x < 0)
 		return smoothed;
 	if (smoothed.x < 0) {
@@ -243,7 +243,30 @@ static bool ComputeGazeFeature(const dlib::full_object_detection& shape,
 	return true;
 }
 
+static cv::Point2f MedianFeature(const cv::Point2f& sample, std::deque<cv::Point2f>& history, size_t maxN = 9) {
+	history.push_back(sample);
+	if (history.size() > maxN) history.pop_front();
+
+	std::vector<float> xs, ys;
+	for (const auto& p : history) {
+		xs.push_back(p.x);
+		ys.push_back(p.y);
+	}
+	std::nth_element(xs.begin(), xs.begin() + xs.size() / 2, xs.end());
+	std::nth_element(ys.begin(), ys.begin() + ys.size() / 2, ys.end());
+	return cv::Point2f(xs[xs.size() / 2], ys[ys.size() / 2]);
+}
+
 static void CaptureLoop(HWND targetWindow) {
+
+	CalibrationConfig config;
+	std::string configPath = GetConfigPath();
+	if (!LoadConfig(configPath, config))
+	{
+		config.screenW = GetSystemMetrics(SM_CXSCREEN);
+		config.screenH = GetSystemMetrics(SM_CYSCREEN);
+		SaveConfig(configPath, config);
+	}
 
 	RECT rect;
 	GetClientRect(targetWindow, &rect);
@@ -251,8 +274,8 @@ static void CaptureLoop(HWND targetWindow) {
 	int y = (rect.bottom - rect.top) / 2;
 
 	cv::VideoCapture cap(0);
-	cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-	cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+	//cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+	//cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
 
 	double actualw = cap.get(cv::CAP_PROP_FRAME_WIDTH);
 	double actualh = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
@@ -293,6 +316,8 @@ static void CaptureLoop(HWND targetWindow) {
 	const int detectingInterval = 10;
 	std::future<std::vector<dlib::rectangle>> detectFuture;
 	bool detectionInProgress = false;
+
+	std::deque<cv::Point2f> gazeHistory;
 
 	while (gRunning) {
 		auto t0 = std::chrono::steady_clock::now();
@@ -358,10 +383,10 @@ static void CaptureLoop(HWND targetWindow) {
 			cv::Mat fullGray;
 			cv::cvtColor(frame, fullGray, cv::COLOR_BGR2GRAY);
 
-			//cv::Point leftPupilRaw = FindPupil(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
-			//cv::Point rightPupilRaw = FindPupil(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
-			cv::Point leftPupilRaw = FindIris(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
-			cv::Point rightPupilRaw = FindIris(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
+			cv::Point2f leftPupilRaw = FindPupil(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
+			cv::Point2f rightPupilRaw = FindPupil(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
+			//cv::Point leftPupilRaw = FindIris(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
+			//cv::Point rightPupilRaw = FindIris(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
 
 			cv::Point2f leftPupil = StabilizePupil(leftPupilRaw, smoothedLPupil, lMissStreak, maxJumpDist, maxMissStreak);
 			cv::Point2f rightPupil = StabilizePupil(rightPupilRaw, smoothedRPupil, rMissStreak, maxJumpDist, maxMissStreak);
@@ -369,9 +394,10 @@ static void CaptureLoop(HWND targetWindow) {
 			cv::Point2f gazeFeature;
 			if (ComputeGazeFeature(shape, leftPupil, rightPupil, gazeFeature, scale))
 			{
+				cv::Point2f smooth = MedianFeature(gazeFeature, gazeHistory);
 				char buf[64];
 				sprintf_s(buf, "gaze: x=%.2f y=%.2f", gazeFeature.x, gazeFeature.y);
-				cv::putText(frame, buf, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
+				cv::putText(frame, buf, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
 			}
 
 			//long minX = shape.part(0).x();
