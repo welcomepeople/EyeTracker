@@ -42,6 +42,7 @@ bool LoadConfig(const std::string& path, CalibrationConfig& config)
 			else if (key == "height_px") { config.screenH = std::stoi(value); found++; }
 			else if (key == "coeffs_x") { ParseCoeffs(value, config.coeffsX); found++; }
 			else if (key == "coeffs_y") { ParseCoeffs(value, config.coeffsY); found++; }
+			else if (key == "calibrated") { config.calibrated = (value == "1"); found++; }
 		}
 	}
 	catch (...)
@@ -50,7 +51,7 @@ bool LoadConfig(const std::string& path, CalibrationConfig& config)
 		return false;
 	}
 
-	config.valid = (found == 4);
+	config.valid = (found == 5);
 	return config.valid;
 }
 
@@ -64,6 +65,7 @@ bool SaveConfig(const std::string& path, const CalibrationConfig& config)
 	out << "height_px=" << config.screenH << "\n";
 	WriteCoeffs(out, "coeffs_x", config.coeffsX);
 	WriteCoeffs(out, "coeffs_y", config.coeffsY);
+	out << "calibrated=" << (config.calibrated ? 1 : 0) << "\n";
 	return true;
 }
 

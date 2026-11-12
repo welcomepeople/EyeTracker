@@ -7,6 +7,7 @@ struct CalibrationConfig {
 	bool valid = false;
 	double coeffsX[6] = {};	//koef za mapiranje pogleda
 	double coeffsY[6] = {}; //koef za mapiranje pogleda
+	bool calibrated = false;
 };
 
 bool LoadConfig(const std::string& path, CalibrationConfig& config);

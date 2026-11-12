@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include "Config.h"
+#include "Calibration.h"
 
 static std::atomic<bool> gRunning{ false };
 static std::thread gCaptureThread;
@@ -45,7 +46,13 @@ static dlib::array2d<unsigned char> MatToDlibGrayscale(const cv::Mat& mat) {
 	return dlibImg;
 }
 
-static cv::Point2f FindPupil(const cv::Mat& grayFrame, cv::Mat& debugFrame, const dlib::full_object_detection& shape, int startIdx, int endIdx, double scale = 1.0, const std::string& debugLabel = "") {
+static cv::Point2f FindPupil(const cv::Mat& grayFrame
+							, cv::Mat& debugFrame
+							, const dlib::full_object_detection& shape
+							, int startIdx
+							, int endIdx
+							, double scale = 1.0
+							, const std::string& debugLabel = "") {
 
 	int minX = shape.part(startIdx).x() / scale;
 	int maxX = minX;
@@ -259,14 +266,14 @@ static cv::Point2f MedianFeature(const cv::Point2f& sample, std::deque<cv::Point
 
 static void CaptureLoop(HWND targetWindow) {
 
-	CalibrationConfig config;
-	std::string configPath = GetConfigPath();
-	if (!LoadConfig(configPath, config))
-	{
-		config.screenW = GetSystemMetrics(SM_CXSCREEN);
-		config.screenH = GetSystemMetrics(SM_CYSCREEN);
-		SaveConfig(configPath, config);
-	}
+	//CalibrationConfig config;
+	//std::string configPath = GetConfigPath();
+	//if (!LoadConfig(configPath, config))
+	//{
+	//	config.screenW = GetSystemMetrics(SM_CXSCREEN);
+	//	config.screenH = GetSystemMetrics(SM_CYSCREEN);
+	//	SaveConfig(configPath, config);
+	//}
 
 	RECT rect;
 	GetClientRect(targetWindow, &rect);
@@ -274,8 +281,8 @@ static void CaptureLoop(HWND targetWindow) {
 	int y = (rect.bottom - rect.top) / 2;
 
 	cv::VideoCapture cap(0);
-	//cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
-	//cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+	cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+	cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
 
 	double actualw = cap.get(cv::CAP_PROP_FRAME_WIDTH);
 	double actualh = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
@@ -319,12 +326,49 @@ static void CaptureLoop(HWND targetWindow) {
 
 	std::deque<cv::Point2f> gazeHistory;
 
+	CalibrationConfig config;
+	std::string configPath = GetConfigPath();
+	LoadConfig(configPath, config);
+
+	int screenW = GetSystemMetrics(SM_CXSCREEN);
+	int screenH = GetSystemMetrics(SM_CYSCREEN);
+	if (config.screenW != screenW || config.screenH != screenH)
+	{
+		config.screenW = screenW;
+		config.screenH = screenH;
+		config.calibrated = false;
+	}
+
+	CalibrationSession session;
+	bool f9WasPressed = false;
+	cv::Point2f dotSmoothed(-1, -1);
+
+	if (!config.calibrated)
+		SetOverlayText("Press F9 to calibrate");
+
 	while (gRunning) {
 		auto t0 = std::chrono::steady_clock::now();
+
+		bool hasFeature = false;
+		cv::Point2f gazeFeature;
 
 		cap >> frame;
 		if (frame.empty())
 			continue;
+
+		bool f9Press = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+		if (f9Press && !f9WasPressed && !session.Active())
+		{
+			session.Start(screenW, screenH);
+			SetGazePoint(-1000, -1000); //sakrij crvenu tackicu
+		}
+
+		f9WasPressed = f9Press;
+		if (session.Active() && (GetAsyncKeyState(VK_ESCAPE) & 0x8000))
+		{
+			session.Cancel();
+			SetOverlayText("Calibration cancelled", 2000);
+		}
 
 		double scale = 0.35;
 		cv::resize(frame, small, cv::Size(), scale, scale);
@@ -383,16 +427,20 @@ static void CaptureLoop(HWND targetWindow) {
 			cv::Mat fullGray;
 			cv::cvtColor(frame, fullGray, cv::COLOR_BGR2GRAY);
 
-			cv::Point2f leftPupilRaw = FindPupil(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
-			cv::Point2f rightPupilRaw = FindPupil(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
+			cv::Point2f leftPupilRaw = FindPupil(fullGray, frame, shape, 36, 41, scale);
+			cv::Point2f rightPupilRaw = FindPupil(fullGray, frame, shape, 42, 47, scale);
+
+			//cv::Point2f leftPupilRaw = FindPupil(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
+			//cv::Point2f rightPupilRaw = FindPupil(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
+			// 
 			//cv::Point leftPupilRaw = FindIris(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
 			//cv::Point rightPupilRaw = FindIris(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
 
 			cv::Point2f leftPupil = StabilizePupil(leftPupilRaw, smoothedLPupil, lMissStreak, maxJumpDist, maxMissStreak);
 			cv::Point2f rightPupil = StabilizePupil(rightPupilRaw, smoothedRPupil, rMissStreak, maxJumpDist, maxMissStreak);
 
-			cv::Point2f gazeFeature;
-			if (ComputeGazeFeature(shape, leftPupil, rightPupil, gazeFeature, scale))
+			hasFeature = ComputeGazeFeature(shape, leftPupil, rightPupil, gazeFeature, scale);
+			if (hasFeature)
 			{
 				cv::Point2f smooth = MedianFeature(gazeFeature, gazeHistory);
 				char buf[64];
@@ -438,10 +486,35 @@ static void CaptureLoop(HWND targetWindow) {
 			framesSinceDetect++;
 		}
 
+		if (session.Active())
+		{
+			if (session.Update(hasFeature, gazeFeature, config))
+			{
+				char buf[128];
+				if (SaveConfig(configPath, config))
+					sprintf_s(buf, "Calibration saved (average fit error %.0f px)", session.LastError());
+				else
+					sprintf_s(buf, "Calibrated, but saving the configuration file failed");
+				SetOverlayText(buf, 8000);
+				dotSmoothed = cv::Point2f(-1, -1);
+			}
+		}
+		else if (config.calibrated && hasFeature)
+		{
+			cv::Point2f smooth = MedianFeature(gazeFeature, gazeHistory);
+			cv::Point2f target = MapGazeToScreen(config, smooth);
+
+			if (dotSmoothed.x < 0)
+				dotSmoothed = target;
+			else
+				dotSmoothed = dotSmoothed * 0.8f + target * 0.2f;
+
+			SetGazePoint((int)dotSmoothed.x, (int)dotSmoothed.y);
+		}
+
 		cv::imshow("Camera Debug", frame);
 		cv::waitKey(1);
 		
-		SetGazePoint(x, y);
 		InvalidateRect(targetWindow, nullptr, FALSE);
 	}
 
