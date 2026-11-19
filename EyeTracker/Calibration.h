@@ -9,6 +9,16 @@ bool FitCalibration(const std::vector<cv::Point2f>& features,
 				const std::vector<cv::Point2f>& screenPts,
 				CalibrationConfig& config);
 
+struct HeadPose { 
+	float shiftX
+		, shiftY
+		, scale
+		, yaw		//horizontalni pomeraj nosa u poredjenju sa srednjom tackom
+		, pitch		//vertikalni pomeraj nosa u poredjenju sa srednjom tackom
+		, roll		//ugao pod kojim je glava
+		; 
+};
+
 cv::Point2f MapGazeToScreen(const CalibrationConfig& config, cv::Point2f feature);
 
 class CalibrationSession
