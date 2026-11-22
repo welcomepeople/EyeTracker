@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 
+constexpr int kPoseTerms = 5;
+
 struct CalibrationConfig {
 	int screenW = 0;
 	int screenH = 0;
@@ -8,6 +10,10 @@ struct CalibrationConfig {
 	double coeffsX[6] = {};	//koef za mapiranje pogleda
 	double coeffsY[6] = {}; //koef za mapiranje pogleda
 	bool calibrated = false;
+	bool hasPose = false;
+	double poseRef[kPoseTerms] = {};
+	double poseX[kPoseTerms] = {};
+	double poseY[kPoseTerms] = {};
 };
 
 bool LoadConfig(const std::string& path, CalibrationConfig& config);

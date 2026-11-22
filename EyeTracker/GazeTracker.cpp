@@ -342,15 +342,6 @@ static cv::Point2f MedianFeature(const cv::Point2f& sample, std::deque<cv::Point
 
 static void CaptureLoop(HWND targetWindow) {
 
-	//CalibrationConfig config;
-	//std::string configPath = GetConfigPath();
-	//if (!LoadConfig(configPath, config))
-	//{
-	//	config.screenW = GetSystemMetrics(SM_CXSCREEN);
-	//	config.screenH = GetSystemMetrics(SM_CYSCREEN);
-	//	SaveConfig(configPath, config);
-	//}
-
 	RECT rect;
 	GetClientRect(targetWindow, &rect);
 	int x = (rect.right - rect.left) / 2;
@@ -420,13 +411,22 @@ static void CaptureLoop(HWND targetWindow) {
 	cv::Point2f dotSmoothed(-1, -1);
 
 	if (!config.calibrated)
-		SetOverlayText("Press F9 to calibrate");
+		SetOverlayText("Pritisni F9 za kalibraciju");
+
+	HeadPose smoothPose{};
+	bool poseInit = false;
+
+	bool spaceWasDown = false;
 
 	while (gRunning) {
 		auto t0 = std::chrono::steady_clock::now();
 
 		bool hasFeature = false;
 		cv::Point2f gazeFeature;
+		cv::Point2f smoothFeature;
+
+		bool hasHeadPose = false;
+		HeadPose headPose{};
 
 		cap >> frame;
 		if (frame.empty())
@@ -443,8 +443,12 @@ static void CaptureLoop(HWND targetWindow) {
 		if (session.Active() && (GetAsyncKeyState(VK_ESCAPE) & 0x8000))
 		{
 			session.Cancel();
-			SetOverlayText("Calibration cancelled", 2000);
+			SetOverlayText("Kalibracija prekinuta", 3000);
 		}
+
+		bool spaceDown = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+		bool spacePressed = spaceDown && !spaceWasDown;
+		spaceWasDown = spaceDown;
 
 		double scale = 0.5;
 		cv::resize(frame, small, cv::Size(), scale, scale);
@@ -453,24 +457,6 @@ static void CaptureLoop(HWND targetWindow) {
 
 		dlibImage = MatToDlibGrayscale(small);
 
-		//the following comment block is being replaced
-
-		//bool needsFullDetect = !hasFace || (framesSinceDetect >= detectingInterval);
-		//if (needsFullDetect) {
-		//	std::vector<dlib::rectangle> faces2 = detector(dlibImage);
-		//	if (!faces2.empty()) {
-		//		lastFace = faces2[0];
-		//		hasFace = true;
-		//	}
-		//	else {
-		//		hasFace = false;
-		//	}
-		//	framesSinceDetect = 0;
-		//}
-
-		//end of comment block
-		// 
-		//block replacing the comment block
 		bool shouldStartDetect = !detectionInProgress 
 			&& (!hasFace || framesSinceDetect >= detectingInterval);
 		if (shouldStartDetect) {
@@ -506,51 +492,49 @@ static void CaptureLoop(HWND targetWindow) {
 			cv::Point2f leftPupilRaw = FindPupil(fullGray, frame, shape, 36, 41, scale);
 			cv::Point2f rightPupilRaw = FindPupil(fullGray, frame, shape, 42, 47, scale);
 
-			//cv::Point2f leftPupilRaw = FindPupil(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
-			//cv::Point2f rightPupilRaw = FindPupil(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
-			// 
-			//cv::Point leftPupilRaw = FindIris(fullGray, frame, shape, 36, 41, scale, "Left Eye Threshold");
-			//cv::Point rightPupilRaw = FindIris(fullGray, frame, shape, 42, 47, scale, "Right Eye Threshold");
-
 			cv::Point2f leftPupil = StabilizePupil(leftPupilRaw, smoothedLPupil, lMissStreak, maxJumpDist, maxMissStreak);
 			cv::Point2f rightPupil = StabilizePupil(rightPupilRaw, smoothedRPupil, rMissStreak, maxJumpDist, maxMissStreak);
 
 			hasFeature = ComputeGazeFeature(shape, leftPupil, rightPupil, gazeFeature, scale);
 
-			/*if (hasFeature)
+			if (hasFeature)
 			{
-				cv::Point2f smooth = MedianFeature(gazeFeature, gazeHistory);
-				char buf[64];
-				sprintf_s(buf, "gaze: x=%.2f y=%.2f", gazeFeature.x, gazeFeature.y);
-				cv::putText(frame, buf, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
-			}*/
+				smoothFeature = MedianFeature(gazeFeature, gazeHistory);
+				//char buf[64];
+				//sprintf_s(buf, "gaze: x=%.2f y=%.2f", gazeFeature.x, gazeFeature.y);
+				//cv::putText(frame, buf, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
+			}
+			hasHeadPose = ComputeHeadPose(shape, scale, frame.cols, frame.rows, headPose);
+			if (hasHeadPose)
+			{
+				const float a = 0.1f;
+				if (!poseInit)
+				{
+					smoothPose = headPose;
+					poseInit = true;
+				}
+				else 
+				{
+					smoothPose.shiftX += a * (headPose.shiftX - smoothPose.shiftX);
+					smoothPose.shiftY += a * (headPose.shiftY - smoothPose.shiftY);
+					smoothPose.scale += a * (headPose.scale - smoothPose.scale);
+					smoothPose.yaw += a * (headPose.yaw - smoothPose.yaw);
+					smoothPose.pitch += a * (headPose.pitch - smoothPose.pitch);
+					smoothPose.roll += a * (headPose.roll - smoothPose.roll);
+				}
+			}
 
-			//long minX = shape.part(0).x();
-			//long maxX = minX;
-			//long minY = shape.part(0).y();
-			//long maxY = minY;
+			//char buffer[200];
+			//sprintf_s(buffer, "shiftX: %.2f\n"
+			//				"shiftY: %.2f\n"
+			//				"scale: %.2f\n"
+			//				"yaw: %.2f\n"
+			//				"pitch: %.2f\n"
+			//				"roll: %.2f\n",
+			//	headPose.shiftX, headPose.shiftY, headPose.scale, headPose.yaw, headPose.pitch, headPose.roll
+			//);
+			//cv::putText(frame, buffer, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(30, 100, 30), 2);
 
-			//for (unsigned int i = 1; i < shape.num_parts(); i++) {
-			//	minX = std::min(minX, (long)shape.part(i).x());
-			//	maxX = std::max(maxX, (long)shape.part(i).x());
-			//	minY = std::min(minY, (long)shape.part(i).y());
-			//	maxY = std::max(maxY, (long)shape.part(i).y());
-			//}
-			//long margin = 20;
-
-			///*long clampedLeft = std::max(0L, minX - margin);
-			//long clampedTop = std::max(0L, minY - margin);
-			//long clampedRight = std::min(static_cast<long>(dlibImage.nc()) - 1, maxX + margin);
-			//long clampedBottom = std::min(static_cast<long>(dlibImage.nr()) - 1, maxY + margin);
-
-			//lastFace = dlib::rectangle(clampedLeft, clampedTop, clampedRight, clampedBottom);*/
-			//lastFace = dlib::rectangle(minX - margin, minY - margin, maxX + margin, maxY + margin);
-
-			//for (unsigned int i = 36; i <= 47; ++i) {
-			//	cv::Point p(shape.part(i).x() / scale, shape.part(i).y() / scale);
-			//	cv::circle(frame, p, 2, cv::Scalar(0, 255, 0), cv::FILLED);
-			//}
-			
 			if (leftPupil.x >= 0) {
 				//cv::circle(frame, cv::Point(leftPupil.x / scale, leftPupil.y / scale), 3, cv::Scalar(255, 0, 0), cv::FILLED);
 				cv::circle(frame, leftPupil, 3, cv::Scalar(255, 0, 0), cv::FILLED);
@@ -565,21 +549,21 @@ static void CaptureLoop(HWND targetWindow) {
 
 		if (session.Active())
 		{
-			if (session.Update(hasFeature, gazeFeature, config))
+			if (session.Update(hasFeature && hasHeadPose, smoothFeature, smoothPose, spacePressed, config))
 			{
-				char buf[128];
+				char buf[160];
 				if (SaveConfig(configPath, config))
-					sprintf_s(buf, "Calibration saved (average fit error %.0f px)", session.LastError());
+					sprintf_s(buf, "Kalibracija sacuvana (greska %.0f px). Korekcija glave: %s"
+						, session.LastError(), session.Report().poseCorrectionOn ? "DA" : "NE");
 				else
-					sprintf_s(buf, "Calibrated, but saving the configuration file failed");
+					sprintf_s(buf, "Kalibrisano, ali snimanje konfiguracionog fajla neuspesno");
 				SetOverlayText(buf, 8000);
 				dotSmoothed = cv::Point2f(-1, -1);
 			}
 		}
 		else if (config.calibrated && hasFeature)
 		{
-			cv::Point2f smooth = MedianFeature(gazeFeature, gazeHistory);
-			cv::Point2f target = MapGazeToScreen(config, smooth);
+			cv::Point2f target = MapGazeToScreen(config, smoothFeature);
 
 			if (dotSmoothed.x < 0)
 				dotSmoothed = target;

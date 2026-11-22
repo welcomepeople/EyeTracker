@@ -1,15 +1,16 @@
 #include "Overlay.h"
 #include "Constants.h"
 #include <mutex>
+#include <vector>
 
 static std::atomic<int> gGazeX{ 0 };
 static std::atomic<int> gGazeY{ 0 };
 static HBRUSH bgBrush = CreateSolidBrush(TRANSPARENT_COLOR);
 static HBRUSH redBrush = CreateSolidBrush(RGB(255, 0, 0));
 
-static std::atomic<bool> calibrationDotVisible{ false };
-static std::atomic<int> calibrationDotX{ 0 };
-static std::atomic<int> calibrationDotY{ 0 };
+static std::mutex calibrationDotsMutex;
+static std::vector<CalibrationDot> calibrationDots;
+static int calibrationActiveDot = -1;
 
 static std::mutex calibrationTextMutex;
 static std::string calibrationText;
@@ -56,11 +57,11 @@ void CleanupOverlay()
     DeleteObject(bgBrush);
 }
 
-void SetCalibrationDot(int x, int y, bool visible)
+void SetCalibrationDots(const std::vector<CalibrationDot>& dots, int activeIndex)
 {
-    calibrationDotX = x;
-    calibrationDotY = y;
-    calibrationDotVisible = visible;
+    std::lock_guard<std::mutex> lock(calibrationDotsMutex);
+    calibrationDots = dots;
+    calibrationActiveDot = activeIndex;
 }
 
 void SetOverlayText(const std::string& text, int durationMs)
@@ -74,16 +75,32 @@ void SetOverlayText(const std::string& text, int durationMs)
 
 void PaintCalibration(HDC hdc, RECT clientRect)
 {
-    if (calibrationDotVisible)
+    std::vector<CalibrationDot> dots;
+    int activeDot;
     {
-        int x = calibrationDotX, y = calibrationDotY, r = 18;
-        HBRUSH yellow = CreateSolidBrush(RGB(255, 255, 0));
-        HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, yellow);
+        std::lock_guard<std::mutex> lock(calibrationDotsMutex);
+        dots = calibrationDots;
+        activeDot = calibrationActiveDot;
+    }
+
+    if (!dots.empty())
+    {
+        HBRUSH yellow = CreateSolidBrush(RGB(150, 150, 50));
+        HBRUSH green = CreateSolidBrush(RGB(25, 255, 25));
         HPEN oldPen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
-        Ellipse(hdc, x - r, y - r, x + r, y + r);
-        SelectObject(hdc, oldBrush);
+        const int radius = 18;
+
+        for (int i = 0; i < static_cast<int>(dots.size()); i++)
+        {
+            HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, (i == activeDot) ? green : yellow);
+            int rad = (i == activeDot) ? radius + 10 : radius;
+            Ellipse(hdc, dots[i].x - rad, dots[i].y - rad,
+                        dots[i].x + rad, dots[i].y + rad);
+            SelectObject(hdc, oldBrush);
+        }
         SelectObject(hdc, oldPen);
         DeleteObject(yellow);
+        DeleteObject(green);
     }
 
     std::string text;
@@ -118,4 +135,11 @@ void PaintCalibration(HDC hdc, RECT clientRect)
         SelectObject(hdc, oldFont);
         DeleteObject(font);
     }
+}
+
+void ClearCalibrationDots()
+{
+    std::lock_guard<std::mutex> lock(calibrationDotsMutex);
+    calibrationDots.clear();
+    calibrationActiveDot = -1;
 }

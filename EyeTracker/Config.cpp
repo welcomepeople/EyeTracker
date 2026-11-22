@@ -4,20 +4,20 @@
 #include <iomanip>
 #include <Windows.h>
 
-static void ParseCoeffs(const std::string& text, double* out) 
+static void ParseCoeffs(const std::string& text, double* out, int count = 6) 
 {
 	std::stringstream ss(text);
 	std::string item;
 	int i = 0;
-	while (i < 6 && std::getline(ss, item, ','))
+	while (i < count && std::getline(ss, item, ','))
 		out[i++] = std::stod(item);
 }
 
-static void WriteCoeffs(std::ofstream& out, const char* key, const double* c) 
+static void WriteCoeffs(std::ofstream& out, const char* key, const double* c, int count = 6) 
 {
 	out << key << "=";
-	for (int i = 0; i < 6; i++)
-		out << c[i] << (i < 5 ? "," : "\n");
+	for (int i = 0; i < count; i++)
+		out << c[i] << (i < count - 1 ? "," : "\n");
 }
 
 bool LoadConfig(const std::string& path, CalibrationConfig& config)
@@ -27,6 +27,7 @@ bool LoadConfig(const std::string& path, CalibrationConfig& config)
 		return false;
 
 	int found = 0;
+	int poseFound = 0;
 	std::string line;
 	try
 	{
@@ -43,6 +44,9 @@ bool LoadConfig(const std::string& path, CalibrationConfig& config)
 			else if (key == "coeffs_x") { ParseCoeffs(value, config.coeffsX); found++; }
 			else if (key == "coeffs_y") { ParseCoeffs(value, config.coeffsY); found++; }
 			else if (key == "calibrated") { config.calibrated = (value == "1"); found++; }
+			else if (key == "pose_ref") { ParseCoeffs(value, config.poseRef, kPoseTerms); poseFound++; }
+			else if (key == "pose_x") { ParseCoeffs(value, config.poseX, kPoseTerms); poseFound++; }
+			else if (key == "pose_y") { ParseCoeffs(value, config.poseY, kPoseTerms); poseFound++; }
 		}
 	}
 	catch (...)
@@ -51,6 +55,7 @@ bool LoadConfig(const std::string& path, CalibrationConfig& config)
 		return false;
 	}
 
+	config.hasPose = (poseFound == 3);
 	config.valid = (found == 5);
 	return config.valid;
 }
@@ -65,6 +70,14 @@ bool SaveConfig(const std::string& path, const CalibrationConfig& config)
 	out << "height_px=" << config.screenH << "\n";
 	WriteCoeffs(out, "coeffs_x", config.coeffsX);
 	WriteCoeffs(out, "coeffs_y", config.coeffsY);
+
+	if (config.hasPose)
+	{
+		WriteCoeffs(out, "pose_ref", config.poseRef, kPoseTerms);
+		WriteCoeffs(out, "pose_x", config.poseX, kPoseTerms);
+		WriteCoeffs(out, "pose_y", config.poseY, kPoseTerms);
+	}
+
 	out << "calibrated=" << (config.calibrated ? 1 : 0) << "\n";
 	return true;
 }
