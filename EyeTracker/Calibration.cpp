@@ -395,11 +395,11 @@ bool FitCalibration(const std::vector<CalibrationSample>& samples
 		config.poseX[i] = useCorrection ? coeffsX.at<double>(3 + i) / poseStdDev[i] : 0.0;
 		config.poseY[i] = useCorrection ? coeffsY.at<double>(3 + i) / poseStdDev[i] : 0.0;
 		if (!std::isfinite(config.poseX[i]) || !std::isfinite(config.poseY[i]))
-			return Fail("pose coefficient is not finite");
+			return Fail("pose coeff not finite");
 	}
 	for (int i = 0; i < 3; i++)
 		if (!std::isfinite(config.coeffsX[i]) || !std::isfinite(config.coeffsY[i]))
-			return Fail("plane coefficient is not finite");
+			return Fail("plane coeff not finite");
 
 	config.hasPose = useCorrection;
 	config.valid = true;
@@ -426,7 +426,7 @@ bool FitCalibration(const std::vector<CalibrationSample>& samples
 				continue;
 			report->neutralDotErr[sample.dot] +=
 				cv::norm(Predict(finalX, finalY, poseRef, poseStdDev, sample, useCorrection) - sample.screen);
-			++dotSampleCount[sample.dot];
+			dotSampleCount[sample.dot]++;
 		}
 		for (int i = 0; i < kNeutralDotCount; i++)
 			if (dotSampleCount[i] > 0)

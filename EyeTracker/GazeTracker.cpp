@@ -348,8 +348,8 @@ static void CaptureLoop(HWND targetWindow) {
 	int y = (rect.bottom - rect.top) / 2;
 
 	cv::VideoCapture cap(0);
-	//cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
-	//cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+	cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+	cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
 
 	double actualw = cap.get(cv::CAP_PROP_FRAME_WIDTH);
 	double actualh = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
